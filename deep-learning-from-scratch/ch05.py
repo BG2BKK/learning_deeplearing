@@ -2,8 +2,9 @@
 
 import numpy as np
 from dataset.mnist import load_mnist
-from common.functions import numerical_gradient, sigmoid, softmax, cross_entropy_error, sigmoid_grad
+from common.layers import Affine, SoftmaxWithLoss, Relu
 import matplotlib.pyplot as plt
+from collections import OrderedDict
 
 
 class TwoLayerNet(object):
@@ -15,18 +16,20 @@ class TwoLayerNet(object):
         self.params['W2'] = weight_init_std * np.random.randn(hidden_size, output_size)
         self.params['b2'] = np.zeros(output_size)
 
+        self.layers = OrderedDict()
+        self.layers['Affine1'] = Affine(self.params['W1'], self.params['b1'])
+        self.layers['Relu1'] = Relu()
+        self.layers['Affine2'] = Affine(self.params['W2'], self.params['b2'])
+        self.last_layer = SoftmaxWithLoss()
+
     def predict(self, x):
-        W1, W2 = self.params['W1'], self.params['W2']
-        b1, b2 = self.params['b1'], self.params['b2']
-        a1 = np.dot(x, W1) + b1
-        z1 = sigmoid(a1)
-        a2 = np.dot(z1, W2) + b2
-        y = softmax(a2)
-        return y
+        for layer in self.layers.values():
+            x = layer.forward(x)
+        return x
 
     def loss(self, x, t):
         y = self.predict(x)
-        return cross_entropy_error(y, t)
+        return self.last_layer.forward(y, t)
 
     def accuracy(self, x, t):
         y = self.predict(x)
@@ -34,37 +37,23 @@ class TwoLayerNet(object):
         t = np.argmax(t, axis=1)
         return np.sum(y == t) / float(x.shape[0])
 
-    def numerical_gradient(self, x, t):
-        loss_W = lambda W: self.loss(x, t)
-        grads = {}
-        grads['W1'] = numerical_gradient(loss_W, self.params['W1'])
-        grads['b1'] = numerical_gradient(loss_W, self.params['b1'])
-        grads['W2'] = numerical_gradient(loss_W, self.params['W2'])
-        grads['b2'] = numerical_gradient(loss_W, self.params['b2'])
-        return grads
-
     def gradient(self, x, t):
-        W1, W2 = self.params['W1'], self.params['W2']
-        b1, b2 = self.params['b1'], self.params['b2']
-        grads = {}
-
-        batch_size = x.shape[0]
-
         # forward
-        a1 = np.dot(x, W1) + b1
-        z1 = sigmoid(a1)
-        a2 = np.dot(z1, W2) + b2
-        y = softmax(a2)
+        self.loss(x, t)
 
         # backward
-        dy = (y-t)/batch_size
-        grads['W2'] = np.dot(z1.T, dy)
-        grads['b2'] = np.sum(dy, axis=0)
+        dout = 1
+        dout = self.last_layer.backward(dout)
+        layers = list(self.layers.values())
+        layers.reverse()
+        for layer in layers:
+            dout = layer.backward(dout)
 
-        dz1 = np.dot(dy, W2.T)
-        da1 = sigmoid_grad(a1) * dz1
-        grads['W1'] = np.dot(x.T, da1)
-        grads['b1'] = np.sum(da1, axis=0)
+        grads = {}
+        grads['W1'] = self.layers['Affine1'].dW
+        grads['b1'] = self.layers['Affine1'].db
+        grads['W2'] = self.layers['Affine2'].dW
+        grads['b2'] = self.layers['Affine2'].db
         return grads
 
 
@@ -96,7 +85,6 @@ for i in range(iter_nums):
     x_batch = x_train[batch_mask]
     t_batch = t_train[batch_mask]
 
-#    grad = net.numerical_gradient(x_batch, t_batch)
     grad = net.gradient(x_batch, t_batch)
     for key in ('W1', 'b1', 'W2', 'b2'):
         net.params[key] -= learning_rate * grad[key]
